@@ -35,18 +35,26 @@ namespace GenericWebApi.Controllers
             }
         }
 
-        [HttpPut("{tableName}")]
-        public async Task<IActionResult> Update(string tableName, [FromBody] Dictionary<string, object> request)
+        [HttpPut("{tableName}/{keyValue}")]
+        public async Task<IActionResult> Update(string tableName, string keyValue, [FromBody] Dictionary<string, object> data)
         {
             try
             {
-                var key = request.ContainsKey("key") ? (Dictionary<string, object>)request["key"] : new Dictionary<string, object>();
-                var data = request.ContainsKey("data") ? (Dictionary<string, object>)request["data"] : new Dictionary<string, object>();
+                if (data == null || data.Count == 0)
+                    return BadRequest(new { error = "Data dictionary cannot be null or empty." });
 
-                var success = await _repository.UpdateAsync(tableName, key, data);
-                if (!success)
-                    return NotFound(new { error = $"Entity with key {Newtonsoft.Json.JsonConvert.SerializeObject(key)} not found in table {tableName}" });
-                return Ok(new { message = "Entity updated successfully" });
+                var connectionString = _configuration.GetConnectionString("DefaultConnection");
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+                    var primaryKey = await _repository.GetPrimaryKeyColumnAsync(connection, tableName);
+                    var key = new Dictionary<string, object> { { primaryKey, ConvertKeyValue(keyValue) } };
+
+                    var success = await _repository.UpdateAsync(tableName, key, data);
+                    if (!success)
+                        return NotFound(new { error = $"Entity with key {primaryKey}={keyValue} not found in table {tableName}" });
+                    return Ok(new { message = "Entity updated successfully" });
+                }
             }
             catch (Exception ex)
             {
