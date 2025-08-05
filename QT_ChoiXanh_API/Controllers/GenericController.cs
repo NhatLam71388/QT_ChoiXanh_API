@@ -35,22 +35,18 @@ namespace GenericWebApi.Controllers
             }
         }
 
-        [HttpPut("{tableName}/{keyValue}")]
-        public async Task<IActionResult> Update(string tableName, string keyValue, [FromBody] Dictionary<string, object> data)
+        [HttpPut("{tableName}")]
+        public async Task<IActionResult> Update(string tableName, [FromBody] Dictionary<string, object> request)
         {
             try
             {
-                var connectionString = _configuration.GetConnectionString("DefaultConnection");
-                using (var connection = new SqlConnection(connectionString))
-                {
-                    await connection.OpenAsync();
-                    var primaryKey = await _repository.GetPrimaryKeyColumnAsync(connection, tableName);
-                    var key = new Dictionary<string, object> { { primaryKey, ConvertKeyValue(keyValue) } };
-                    var success = await _repository.UpdateAsync(tableName, key, data);
-                    if (!success)
-                        return NotFound(new { error = $"Entity with key {primaryKey}={keyValue} not found in table {tableName}" });
-                    return Ok(new { message = "Entity updated successfully" });
-                }
+                var key = request.ContainsKey("key") ? (Dictionary<string, object>)request["key"] : new Dictionary<string, object>();
+                var data = request.ContainsKey("data") ? (Dictionary<string, object>)request["data"] : new Dictionary<string, object>();
+
+                var success = await _repository.UpdateAsync(tableName, key, data);
+                if (!success)
+                    return NotFound(new { error = $"Entity with key {Newtonsoft.Json.JsonConvert.SerializeObject(key)} not found in table {tableName}" });
+                return Ok(new { message = "Entity updated successfully" });
             }
             catch (Exception ex)
             {
@@ -105,11 +101,11 @@ namespace GenericWebApi.Controllers
         }
 
         [HttpGet("{tableName}")]
-        public async Task<IActionResult> GetAll(string tableName)
+        public async Task<IActionResult> GetAll(string tableName, [FromQuery] int page = 1, [FromQuery] int pageSize = 100)
         {
             try
             {
-                var entities = await _repository.GetAllAsync(tableName);
+                var entities = await _repository.GetAllAsync(tableName, page, pageSize);
                 return Ok(entities);
             }
             catch (Exception ex)

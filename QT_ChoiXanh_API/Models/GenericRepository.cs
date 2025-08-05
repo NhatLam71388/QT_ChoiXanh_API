@@ -56,7 +56,7 @@ namespace GenericWebApi.Repositories
             if (newId == 0)
                 throw new InvalidOperationException("Failed to retrieve new ID from database.");
 
-            return new Dictionary<string, object> { { "New_Key_ID", newId } };
+            return new Dictionary<string, object> { { "CustomerID", newId } };
         }
 
         private async Task<int> GetLastInsertedIdAsync(string connectionString, string tableName)
@@ -162,17 +162,19 @@ namespace GenericWebApi.Repositories
             return null;
         }
 
-        public async Task<List<Dictionary<string, object>>> GetAllAsync(string tableName)
+        public async Task<List<Dictionary<string, object>>> GetAllAsync(string tableName, int page = 1, int pageSize = 100)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
             using (var connection = new SqlConnection(connectionString))
             {
                 await connection.OpenAsync();
                 var result = new List<Dictionary<string, object>>();
-                var query = $"SELECT * FROM [{tableName}]";
+                var query = $"SELECT * FROM [{tableName}] ORDER BY (SELECT NULL) OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
-                using (var command = new SqlCommand(query, connection))
+                using (var command = new SqlCommand(query, connection) { CommandTimeout = 60 })
                 {
+                    command.Parameters.AddWithValue("@Offset", (page - 1) * pageSize);
+                    command.Parameters.AddWithValue("@PageSize", Math.Min(pageSize, 1000)); // Giới hạn tối đa 1000 bản ghi
                     using (var reader = await command.ExecuteReaderAsync())
                     {
                         while (await reader.ReadAsync())
