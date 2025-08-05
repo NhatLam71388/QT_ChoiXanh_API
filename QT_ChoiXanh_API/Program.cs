@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using GenericWebApi.Data;
 using GenericWebApi.Repositories;
 using Microsoft.AspNetCore.Mvc; // Add this using directive
@@ -10,6 +10,18 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+
+// Cho phép tất cả origin (nếu bạn đang dev, tạm thời)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", builder =>
+    {
+        builder
+            .AllowAnyOrigin()
+            .AllowAnyMethod()
+            .AllowAnyHeader();
+    });
+});
 // Configure DbContext (optional, if needed)
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -25,7 +37,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
+app.UseCors("AllowAll");
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
