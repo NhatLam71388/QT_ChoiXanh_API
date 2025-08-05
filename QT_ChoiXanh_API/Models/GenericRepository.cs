@@ -1,0 +1,238 @@
+﻿using GenericWebApi.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace GenericWebApi.Repositories
+{
+    public class GenericRepository : IGenericRepository
+    {
+        private readonly AppDbContext _context;
+        private readonly IConfiguration _configuration;
+
+        public GenericRepository(AppDbContext context, IConfiguration configuration)
+        {
+            _context = context;
+            _configuration = configuration;
+        }
+
+        public async Task<Dictionary<string, object>> AddAsync(string tableName, Dictionary<string, object> data)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            var columns = string.Join(", ", data.Keys);
+            var parameters = string.Join(", ", data.Keys.Select(k => "@" + k));
+            var query = $"INSERT INTO [{tableName}] ({columns}) VALUES ({parameters}); SELECT SCOPE_IDENTITY()";
+
+            int newId;
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using (var command = new SqlCommand(query, connection))
+                {
+                    foreach (var kvp in data)
+                    {
+                        var value = ConvertValue(kvp.Value);
+                        command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                    }
+                    var newIdObj = await command.ExecuteScalarAsync();
+                    Console.WriteLine($"New ID object: {newIdObj?.GetType().Name} - Value: {newIdObj}");
+
+                    if (newIdObj == DBNull.Value || newIdObj == null)
+                    {
+                        Console.WriteLine("Warning: No valid ID returned from SCOPE_IDENTITY. Fetching last inserted ID.");
+                        newId = await GetLastInsertedIdAsync(connectionString, tableName);
+                    }
+                    else
+                    {
+                        newId = Convert.ToInt32(newIdObj);
+                    }
+                }
+            }
+
+            if (newId == 0)
+                throw new InvalidOperationException("Failed to retrieve new ID from database.");
+
+            return new Dictionary<string, object> { { "New_Key_ID", newId } };
+        }
+
+        private async Task<int> GetLastInsertedIdAsync(string connectionString, string tableName)
+        {
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var primaryKey = await GetPrimaryKeyColumnAsync(connection, tableName);
+                var query = $"SELECT MAX([{primaryKey}]) FROM [{tableName}]";
+                using (var command = new SqlCommand(query, connection))
+                {
+                    var lastIdObj = await command.ExecuteScalarAsync();
+                    return lastIdObj != DBNull.Value && lastIdObj != null ? Convert.ToInt32(lastIdObj) : 0;
+                }
+            }
+        }
+
+        public async Task<bool> UpdateAsync(string tableName, Dictionary<string, object> key, Dictionary<string, object> data)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var primaryKey = await GetPrimaryKeyColumnAsync(connection, tableName);
+                var setClauses = string.Join(", ", data.Keys.Where(k => k != primaryKey).Select(k => $"[{k}] = @{k}"));
+                var whereClause = string.Join(" AND ", key.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
+                var query = $"UPDATE [{tableName}] SET {setClauses} WHERE {whereClause}";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    foreach (var kvp in key)
+                    {
+                        var value = ConvertValue(kvp.Value);
+                        command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                    }
+                    foreach (var kvp in data)
+                    {
+                        if (kvp.Key != primaryKey)
+                        {
+                            var value = ConvertValue(kvp.Value);
+                            command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                        }
+                    }
+                    var rowsAffected = await command.ExecuteNonQueryAsync();
+                    return rowsAffected > 0;
+                }
+            }
+        }
+
+        public async Task<bool> DeleteAsync(string tableName, Dictionary<string, object> key)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var primaryKey = await GetPrimaryKeyColumnAsync(connection, tableName);
+                var whereClause = string.Join(" AND ", key.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
+                var query = $"DELETE FROM [{tableName}] WHERE {whereClause}";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    foreach (var kvp in key)
+                    {
+                        var value = ConvertValue(kvp.Value);
+                        command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                    }
+                    var rowsAffected = await command.ExecuteNonQueryAsync();
+                    return rowsAffected > 0;
+                }
+            }
+        }
+
+        public async Task<Dictionary<string, object>> GetByIdAsync(string tableName, Dictionary<string, object> key)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var result = new Dictionary<string, object>();
+                var whereClause = string.Join(" AND ", key.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
+                var query = $"SELECT * FROM [{tableName}] WHERE {whereClause}";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    foreach (var kvp in key)
+                    {
+                        var value = ConvertValue(kvp.Value);
+                        command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                    }
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                result[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+                            return result;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        public async Task<List<Dictionary<string, object>>> GetAllAsync(string tableName)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var result = new List<Dictionary<string, object>>();
+                var query = $"SELECT * FROM [{tableName}]";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var row = new Dictionary<string, object>();
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+                            result.Add(row);
+                        }
+                    }
+                }
+                return result;
+            }
+        }
+
+        public async Task<string> GetPrimaryKeyColumnAsync(SqlConnection connection, string tableName)
+        {
+            var query = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = @TableName AND TABLE_SCHEMA = 'dbo' AND CONSTRAINT_NAME LIKE 'PK_%'";
+            using (var command = new SqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@TableName", tableName.Replace("dbo.", ""));
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        return reader["COLUMN_NAME"].ToString();
+                    }
+                }
+            }
+            throw new InvalidOperationException($"No primary key found for table {tableName}");
+        }
+
+        private object ConvertValue(object value)
+        {
+            if (value == null) return null;
+
+            if (value is JsonElement jsonElement)
+            {
+                switch (jsonElement.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        return jsonElement.GetString();
+                    case JsonValueKind.Number:
+                        return jsonElement.GetInt32();
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                        return jsonElement.GetBoolean();
+                    case JsonValueKind.Null:
+                        return null;
+                    case JsonValueKind.Object:
+                    case JsonValueKind.Array:
+                        return jsonElement.ToString();
+                    default:
+                        throw new InvalidOperationException($"Unsupported JsonElement type: {jsonElement.ValueKind}");
+                }
+            }
+
+            return value;
+        }
+    }
+}
