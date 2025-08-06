@@ -1,6 +1,4 @@
-﻿using GenericWebApi.Data;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -11,12 +9,10 @@ namespace GenericWebApi.Repositories
 {
     public class GenericRepository : IGenericRepository
     {
-        private readonly AppDbContext _context;
         private readonly IConfiguration _configuration;
 
-        public GenericRepository(AppDbContext context, IConfiguration configuration)
+        public GenericRepository(IConfiguration configuration)
         {
-            _context = context;
             _configuration = configuration;
         }
 

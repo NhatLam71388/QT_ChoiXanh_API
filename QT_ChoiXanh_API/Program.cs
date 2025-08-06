@@ -1,7 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
-using GenericWebApi.Data;
-using GenericWebApi.Repositories;
-using Microsoft.AspNetCore.Mvc; // Add this using directive
+﻿using GenericWebApi.Repositories;
+using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,7 +7,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
 
 // Cho phép tất cả origin (nếu bạn đang dev, tạm thời)
 builder.Services.AddCors(options =>
@@ -22,9 +19,6 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader();
     });
 });
-// Configure DbContext (optional, if needed)
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Register Generic Repository with IConfiguration
 builder.Services.AddScoped<IGenericRepository, GenericRepository>();
