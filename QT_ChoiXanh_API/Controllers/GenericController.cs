@@ -129,6 +129,53 @@ namespace GenericWebApi.Controllers
             }
         }
 
+        [HttpGet("{tableName}/filter")]
+        public async Task<IActionResult> GetByColumns(
+            string tableName, 
+            [FromQuery] string keyValues = null,
+            [FromQuery] int page = 1, 
+            [FromQuery] int pageSize = 100)
+        {
+            try
+            {
+                var columnFilters = new Dictionary<string, object>();
+                
+                // Parse keyValues parameter if provided (format: "IDBG=223,IDPart=60004")
+                if (!string.IsNullOrEmpty(keyValues))
+                {
+                    var keyValuePairs = keyValues.Split(',');
+                    foreach (var pair in keyValuePairs)
+                    {
+                        var parts = pair.Split('=');
+                        if (parts.Length == 2)
+                        {
+                            var key = parts[0].Trim();
+                            var value = parts[1].Trim();
+                            columnFilters[key] = ConvertKeyValue(value);
+                        }
+                    }
+                }
+                
+                // Also parse filter parameters from query string (for backward compatibility)
+                foreach (var param in Request.Query)
+                {
+                    if (param.Key.ToLower() != "page" && 
+                        param.Key.ToLower() != "pagesize" && 
+                        param.Key.ToLower() != "keyvalues")
+                    {
+                        columnFilters[param.Key] = param.Value.ToString();
+                    }
+                }
+
+                var entities = await _repository.GetByColumnsAsync(tableName, columnFilters, page, pageSize);
+                return Ok(entities);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = $"Error retrieving filtered entities: {ex.Message}" });
+            }
+        }
+
         private object ConvertKeyValue(string keyValue)
         {
             if (int.TryParse(keyValue, out int intValue))

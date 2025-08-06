@@ -166,6 +166,55 @@ namespace GenericWebApi.Repositories
             }
         }
 
+        public async Task<List<Dictionary<string, object>>> GetByColumnsAsync(string tableName, Dictionary<string, object> columnFilters, int page = 1, int pageSize = 100)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                var result = new List<Dictionary<string, object>>();
+                
+                string whereClause = "";
+                if (columnFilters != null && columnFilters.Count > 0)
+                {
+                    whereClause = " WHERE " + string.Join(" AND ", columnFilters.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
+                }
+
+                var query = $"SELECT * FROM [{tableName}]{whereClause} ORDER BY (SELECT NULL) OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+
+                using (var command = new SqlCommand(query, connection) { CommandTimeout = 60 })
+                {
+                    // Add filter parameters
+                    if (columnFilters != null)
+                    {
+                        foreach (var kvp in columnFilters)
+                        {
+                            var value = ConvertValue(kvp.Value);
+                            command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
+                        }
+                    }
+                    
+                    // Add pagination parameters
+                    command.Parameters.AddWithValue("@Offset", (page - 1) * pageSize);
+                    command.Parameters.AddWithValue("@PageSize", Math.Min(pageSize, 1000)); // Giới hạn tối đa 1000 bản ghi
+
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var row = new Dictionary<string, object>();
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+                            result.Add(row);
+                        }
+                    }
+                }
+                return result;
+            }
+        }
+
         public async Task<string> GetPrimaryKeyColumnAsync(SqlConnection connection, string tableName)
         {
             var query = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = @TableName AND TABLE_SCHEMA = 'dbo' AND CONSTRAINT_NAME LIKE 'PK_%'";
