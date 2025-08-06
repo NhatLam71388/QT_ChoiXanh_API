@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace GenericWebApi.Controllers
@@ -24,14 +25,14 @@ namespace GenericWebApi.Controllers
         {
             try
             {
-                var result = await _repository.AddAsync(tableName, data);
-                if (result == null || result.Count == 0)
-                    return BadRequest(new { error = "Failed to add entity and retrieve new ID." });
-                return Ok(result);
+                var success = await _repository.AddAsync(tableName, data);
+                if (success)
+                    return Ok(new { success = true, message = "Entity inserted successfully" });
+                return BadRequest(new { success = false, message = "Failed to add entity" });
             }
             catch (Exception ex)
             {
-                return BadRequest(new { error = $"Error adding entity: {ex.Message}" });
+                return BadRequest(new { success = false, message = $"Error adding entity: {ex.Message}" });
             }
         }
 
@@ -86,7 +87,7 @@ namespace GenericWebApi.Controllers
         }
 
         [HttpGet("{tableName}/{keyValue}")]
-        public async Task<IActionResult> GetById(string tableName, string keyValue)
+        public async Task<IActionResult> GetById(string tableName, string keyValue, [FromQuery] string? columns)
         {
             try
             {
@@ -96,7 +97,10 @@ namespace GenericWebApi.Controllers
                     await connection.OpenAsync();
                     var primaryKey = await _repository.GetPrimaryKeyColumnAsync(connection, tableName);
                     var key = new Dictionary<string, object> { { primaryKey, ConvertKeyValue(keyValue) } };
-                    var entity = await _repository.GetByIdAsync(tableName, key);
+                    var columnArray = string.IsNullOrWhiteSpace(columns)
+                        ? null
+                        : columns.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(c => c.Trim()).ToArray();
+                    var entity = await _repository.GetByIdAsync(tableName, key, columnArray);
                     if (entity == null)
                         return NotFound(new { error = $"Entity with key {primaryKey}={keyValue} not found in table {tableName}" });
                     return Ok(entity);
@@ -109,11 +113,14 @@ namespace GenericWebApi.Controllers
         }
 
         [HttpGet("{tableName}")]
-        public async Task<IActionResult> GetAll(string tableName, [FromQuery] int page = 1, [FromQuery] int pageSize = 100)
+        public async Task<IActionResult> GetAll(string tableName, [FromQuery] string? columns, [FromQuery] int page = 1, [FromQuery] int pageSize = 100)
         {
             try
             {
-                var entities = await _repository.GetAllAsync(tableName, page, pageSize);
+                var columnArray = string.IsNullOrWhiteSpace(columns)
+                    ? null
+                    : columns.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(c => c.Trim()).ToArray();
+                var entities = await _repository.GetAllAsync(tableName, page, pageSize, columnArray);
                 return Ok(entities);
             }
             catch (Exception ex)
