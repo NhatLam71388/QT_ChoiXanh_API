@@ -24,14 +24,14 @@ namespace GenericWebApi.Controllers
         {
             try
             {
-                var result = await _repository.AddAsync(tableName, data);
-                if (result == null || result.Count == 0)
-                    return BadRequest(new { error = "Failed to add entity and retrieve new ID." });
-                return Ok(result);
+                var success = await _repository.AddAsync(tableName, data);
+                if (success)
+                    return Ok(new { success = true, message = "Entity insert successfully" });
+                return BadRequest(new { success = false, message = "Failed to add entity" });
             }
             catch (Exception ex)
             {
-                return BadRequest(new { error = $"Error adding entity: {ex.Message}" });
+                return BadRequest(new { success = false, message = $"Error adding entity: {ex.Message}" });
             }
         }
 

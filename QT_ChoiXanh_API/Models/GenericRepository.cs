@@ -20,14 +20,13 @@ namespace GenericWebApi.Repositories
             _configuration = configuration;
         }
 
-        public async Task<Dictionary<string, object>> AddAsync(string tableName, Dictionary<string, object> data)
+        public async Task<bool> AddAsync(string tableName, Dictionary<string, object> data)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
             var columns = string.Join(", ", data.Keys);
             var parameters = string.Join(", ", data.Keys.Select(k => "@" + k));
-            var query = $"INSERT INTO [{tableName}] ({columns}) VALUES ({parameters}); SELECT SCOPE_IDENTITY()";
+            var query = $"INSERT INTO [{tableName}] ({columns}) VALUES ({parameters})";
 
-            int newId;
             using (var connection = new SqlConnection(connectionString))
             {
                 await connection.OpenAsync();
@@ -38,38 +37,8 @@ namespace GenericWebApi.Repositories
                         var value = ConvertValue(kvp.Value);
                         command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
                     }
-                    var newIdObj = await command.ExecuteScalarAsync();
-                    Console.WriteLine($"New ID object: {newIdObj?.GetType().Name} - Value: {newIdObj}");
-
-                    if (newIdObj == DBNull.Value || newIdObj == null)
-                    {
-                        Console.WriteLine("Warning: No valid ID returned from SCOPE_IDENTITY. Fetching last inserted ID.");
-                        newId = await GetLastInsertedIdAsync(connectionString, tableName);
-                    }
-                    else
-                    {
-                        newId = Convert.ToInt32(newIdObj);
-                    }
-                }
-            }
-
-            if (newId == 0)
-                throw new InvalidOperationException("Failed to retrieve new ID from database.");
-
-            return new Dictionary<string, object> { { "CustomerID", newId } };
-        }
-
-        private async Task<int> GetLastInsertedIdAsync(string connectionString, string tableName)
-        {
-            using (var connection = new SqlConnection(connectionString))
-            {
-                await connection.OpenAsync();
-                var primaryKey = await GetPrimaryKeyColumnAsync(connection, tableName);
-                var query = $"SELECT MAX([{primaryKey}]) FROM [{tableName}]";
-                using (var command = new SqlCommand(query, connection))
-                {
-                    var lastIdObj = await command.ExecuteScalarAsync();
-                    return lastIdObj != DBNull.Value && lastIdObj != null ? Convert.ToInt32(lastIdObj) : 0;
+                    var affectedRows = await command.ExecuteNonQueryAsync();
+                    return affectedRows > 0;
                 }
             }
         }

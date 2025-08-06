@@ -6,7 +6,7 @@ namespace GenericWebApi.Repositories
 {
     public interface IGenericRepository
     {
-        Task<Dictionary<string, object>> AddAsync(string tableName, Dictionary<string, object> data);
+        Task<bool> AddAsync(string tableName, Dictionary<string, object> data);
         Task<bool> UpdateAsync(string tableName, Dictionary<string, object> key, Dictionary<string, object> data);
         Task<bool> DeleteAsync(string tableName, Dictionary<string, object> key);
         Task<Dictionary<string, object>> GetByIdAsync(string tableName, Dictionary<string, object> key);
