@@ -50,7 +50,13 @@ namespace GenericWebApi.Repositories
             {
                 await connection.OpenAsync();
                 var primaryKey = await GetPrimaryKeyColumnAsync(connection, tableName);
-                var setClauses = string.Join(", ", data.Keys.Where(k => k != primaryKey).Select(k => $"[{k}] = @{k}"));
+
+                // Only update columns provided in the data dictionary, excluding the primary key
+                var validColumns = data.Keys.Where(k => k != primaryKey).ToList();
+                if (validColumns.Count == 0)
+                    throw new ArgumentException("No valid columns provided for update.");
+
+                var setClauses = string.Join(", ", validColumns.Select(k => $"[{k}] = @{k}"));
                 var whereClause = string.Join(" AND ", key.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
                 var query = $"UPDATE [{tableName}] SET {setClauses} WHERE {whereClause}";
 
@@ -61,13 +67,10 @@ namespace GenericWebApi.Repositories
                         var value = ConvertValue(kvp.Value);
                         command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
                     }
-                    foreach (var kvp in data)
+                    foreach (var column in validColumns)
                     {
-                        if (kvp.Key != primaryKey)
-                        {
-                            var value = ConvertValue(kvp.Value);
-                            command.Parameters.AddWithValue("@" + kvp.Key, value ?? DBNull.Value);
-                        }
+                        var value = ConvertValue(data[column]);
+                        command.Parameters.AddWithValue("@" + column, value ?? DBNull.Value);
                     }
                     var rowsAffected = await command.ExecuteNonQueryAsync();
                     return rowsAffected > 0;
@@ -98,15 +101,18 @@ namespace GenericWebApi.Repositories
             }
         }
 
-        public async Task<Dictionary<string, object>> GetByIdAsync(string tableName, Dictionary<string, object> key)
+        public async Task<Dictionary<string, object>> GetByIdAsync(string tableName, Dictionary<string, object> key, string[]? columns)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
             using (var connection = new SqlConnection(connectionString))
             {
                 await connection.OpenAsync();
                 var result = new Dictionary<string, object>();
+                var columnList = columns != null && columns.Length > 0
+                    ? string.Join(", ", columns.Select(c => $"[{c.Trim()}]"))
+                    : string.Join(", ", (await GetAllColumnsAsync(connection, tableName)).Select(c => $"[{c}]"));
                 var whereClause = string.Join(" AND ", key.Select(kvp => $"[{kvp.Key}] = @{kvp.Key}"));
-                var query = $"SELECT * FROM [{tableName}] WHERE {whereClause}";
+                var query = $"SELECT {columnList} FROM [{tableName}] WHERE {whereClause}";
 
                 using (var command = new SqlCommand(query, connection))
                 {
@@ -131,19 +137,22 @@ namespace GenericWebApi.Repositories
             return null;
         }
 
-        public async Task<List<Dictionary<string, object>>> GetAllAsync(string tableName, int page = 1, int pageSize = 100)
+        public async Task<List<Dictionary<string, object>>> GetAllAsync(string tableName, int page, int pageSize, string[]? columns)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
             using (var connection = new SqlConnection(connectionString))
             {
                 await connection.OpenAsync();
                 var result = new List<Dictionary<string, object>>();
-                var query = $"SELECT * FROM [{tableName}] ORDER BY (SELECT NULL) OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+                var columnList = columns != null && columns.Length > 0
+                    ? string.Join(", ", columns.Select(c => $"[{c.Trim()}]"))
+                    : string.Join(", ", (await GetAllColumnsAsync(connection, tableName)).Select(c => $"[{c}]"));
+                var query = $"SELECT {columnList} FROM [{tableName}] ORDER BY (SELECT NULL) OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
                 using (var command = new SqlCommand(query, connection) { CommandTimeout = 60 })
                 {
                     command.Parameters.AddWithValue("@Offset", (page - 1) * pageSize);
-                    command.Parameters.AddWithValue("@PageSize", Math.Min(pageSize, 1000)); // Giới hạn tối đa 1000 bản ghi
+                    command.Parameters.AddWithValue("@PageSize", Math.Min(pageSize, 1000));
                     using (var reader = await command.ExecuteReaderAsync())
                     {
                         while (await reader.ReadAsync())
@@ -178,6 +187,26 @@ namespace GenericWebApi.Repositories
             throw new InvalidOperationException($"No primary key found for table {tableName}");
         }
 
+        private async Task<List<string>> GetAllColumnsAsync(SqlConnection connection, string tableName)
+        {
+            var columns = new List<string>();
+            var query = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName AND TABLE_SCHEMA = 'dbo'";
+            using (var command = new SqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@TableName", tableName.Replace("dbo.", ""));
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        columns.Add(reader["COLUMN_NAME"].ToString());
+                    }
+                }
+            }
+            if (columns.Count == 0)
+                throw new InvalidOperationException($"No columns found for table {tableName}");
+            return columns;
+        }
+
         private object ConvertValue(object value)
         {
             if (value == null) return null;
@@ -187,6 +216,8 @@ namespace GenericWebApi.Repositories
                 switch (jsonElement.ValueKind)
                 {
                     case JsonValueKind.String:
+                        if (DateTime.TryParse(jsonElement.GetString(), out DateTime dateTimeValue))
+                            return dateTimeValue;
                         return jsonElement.GetString();
                     case JsonValueKind.Number:
                         return jsonElement.GetInt32();
