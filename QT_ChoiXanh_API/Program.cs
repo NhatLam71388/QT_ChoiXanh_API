@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using GenericWebApi.Data;
 using GenericWebApi.Repositories;
 using Microsoft.AspNetCore.Mvc; // Add this using directive
